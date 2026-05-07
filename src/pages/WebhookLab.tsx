@@ -1,0 +1,253 @@
+import { useState, useEffect } from 'react';
+import DashboardLayout from '../components/DashboardLayout';
+import { 
+  Globe, 
+  Copy, 
+  Trash2, 
+  RefreshCw, 
+  ExternalLink, 
+  History, 
+  CheckCircle2, 
+  AlertCircle,
+  FileJson,
+  Search,
+  Filter,
+  PlayCircle
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { cn } from '../lib/utils';
+import Editor from '@monaco-editor/react';
+import { collection, query, where, onSnapshot, orderBy, limit } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { useAuthStore } from '../hooks/useAuth';
+
+export default function WebhookLab() {
+  const { user } = useAuthStore();
+  const [events, setEvents] = useState<any[]>([]);
+  const [selectedEvent, setSelectedEvent] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState('');
+  const [errorStatus, setErrorStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    
+    // Generate the webhook URL using process.env.APP_URL
+    const baseUrl = process.env.APP_URL || window.location.origin;
+    setWebhookUrl(`${baseUrl}/wh/user-${user.uid}`);
+
+    // Real-time listener for webhook events
+    const path = `users/${user.uid}/webhooks/main/events`;
+    const q = query(
+      collection(db, path),
+      orderBy('receivedAt', 'desc'),
+      limit(20)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const newEvents = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setEvents(newEvents);
+      setErrorStatus(null);
+    }, (error) => {
+      setErrorStatus(error.message);
+      handleFirestoreError(error, OperationType.LIST, path);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  const copyUrl = () => {
+    navigator.clipboard.writeText(webhookUrl);
+  };
+
+  const simulateWebhook = async () => {
+    setLoading(true);
+    try {
+      await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Simulation': 'FlowForge' },
+        body: JSON.stringify({
+          event: "order.created",
+          data: {
+            id: "ord_12345",
+            amount: 5999,
+            currency: "usd",
+            customer: {
+              name: "John Doe",
+              email: "john@example.com"
+            }
+          }
+        })
+      });
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <DashboardLayout>
+      <div className="space-y-6">
+        <header className="flex items-center justify-between">
+           <div>
+              <h1 className="text-xl font-bold tracking-tight">Webhook Lab</h1>
+              <p className="text-xs text-neutral-500">Inspect and replay incoming integration events in real-time.</p>
+           </div>
+           <div className="flex gap-2">
+              <button 
+                onClick={simulateWebhook}
+                disabled={loading}
+                className="flex items-center gap-2 rounded-lg bg-white/5 border border-white/10 px-4 py-2 text-xs font-semibold text-white hover:bg-white/10 transition-all disabled:opacity-50"
+              >
+                  <PlayCircle className="h-4 w-4 text-brand-cyan" />
+                  Simulate Event
+              </button>
+           </div>
+        </header>
+
+        {/* Webhook Configuration Card */}
+        <div className="rounded-xl border border-white/5 bg-white/[0.02] p-6">
+           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+              <div className="space-y-1">
+                 <h3 className="text-sm font-semibold">Your Webhook URL</h3>
+                 <p className="text-xs text-neutral-500">Send POST requests to this URL to see them appear below.</p>
+              </div>
+              <div className="flex flex-1 max-w-xl items-center gap-2">
+                 <div className="flex-1 flex items-center gap-2 rounded-lg bg-black px-4 py-2.5 font-mono text-[11px] text-brand-cyan border border-white/5 overflow-x-auto whitespace-nowrap">
+                    {webhookUrl}
+                 </div>
+                 <button 
+                   onClick={copyUrl}
+                   className="p-2.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-all text-neutral-400 hover:text-white"
+                 >
+                    <Copy className="h-4 w-4" />
+                 </button>
+              </div>
+           </div>
+        </div>
+
+        {/* Content Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[500px]">
+           {/* Sidebar: Event Feed */}
+           <div className="flex flex-col rounded-xl border border-white/5 bg-white/[0.02] overflow-hidden">
+              <div className="p-4 border-b border-white/5 flex items-center justify-between shrink-0">
+                 <div className="flex items-center gap-2">
+                    <History className="h-4 w-4 text-neutral-500" />
+                    <h3 className="text-xs font-bold uppercase tracking-widest text-neutral-500">Event Stream</h3>
+                 </div>
+                 <span className="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                 {events.length === 0 ? (
+                    <div className="flex h-full flex-col items-center justify-center p-8 text-center text-neutral-600">
+                       <RefreshCw className="h-8 w-8 mb-4 animate-spin-slow opacity-20" />
+                       <p className="text-xs italic">Waiting for incoming events...</p>
+                    </div>
+                 ) : (
+                    <div className="divide-y divide-white/5">
+                       {events.map((event) => (
+                          <EventListItem 
+                            key={event.id}
+                            event={event}
+                            isActive={selectedEvent?.id === event.id}
+                            onClick={() => setSelectedEvent(event)}
+                          />
+                       ))}
+                    </div>
+                 )}
+              </div>
+           </div>
+
+           {/* Main: Event Inspector */}
+           <div className="lg:col-span-2 flex flex-col rounded-xl border border-white/5 bg-white/[0.02] overflow-hidden">
+              {selectedEvent ? (
+                 <div className="flex-1 flex flex-col min-h-0">
+                    <div className="p-4 border-b border-white/5 flex items-center justify-between shrink-0">
+                       <div className="flex items-center gap-3">
+                          <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                          <h3 className="text-sm font-semibold">{selectedEvent.method} Event</h3>
+                          <span className="text-[10px] text-neutral-600 font-mono">{selectedEvent.id}</span>
+                       </div>
+                       <button className="flex items-center gap-2 rounded-md bg-brand-blue/10 px-3 py-1 text-[10px] font-bold text-brand-blue hover:bg-brand-blue/20 transition-all">
+                          Replay Event
+                       </button>
+                    </div>
+
+                    <div className="flex-1 grid grid-cols-1 md:grid-cols-2">
+                       <div className="border-r border-white/5 flex flex-col">
+                          <div className="p-3 px-4 text-[10px] font-bold uppercase tracking-widest text-neutral-500 bg-black/20">Headers</div>
+                          <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                             {Object.entries(selectedEvent.headers || {}).map(([key, val]: any) => (
+                                <div key={key} className="flex flex-col gap-1">
+                                   <span className="text-[10px] font-mono text-neutral-500">{key}</span>
+                                   <span className="text-[11px] font-mono break-all text-neutral-200">{val}</span>
+                                </div>
+                             ))}
+                          </div>
+                       </div>
+                       <div className="flex flex-col min-h-0">
+                          <div className="p-3 px-4 text-[10px] font-bold uppercase tracking-widest text-neutral-500 bg-black/20">Payload</div>
+                          <div className="flex-1 overflow-hidden">
+                             <Editor 
+                                height="100%"
+                                defaultLanguage="json"
+                                theme="vs-dark"
+                                value={typeof selectedEvent.body === 'string' ? selectedEvent.body : JSON.stringify(selectedEvent.body, null, 2)}
+                                options={{
+                                  readOnly: true,
+                                  minimap: { enabled: false },
+                                  fontSize: 11,
+                                  lineNumbers: 'on',
+                                  scrollBeyondLastLine: false,
+                                  automaticLayout: true,
+                                  padding: { top: 12 }
+                                }}
+                             />
+                          </div>
+                       </div>
+                    </div>
+                 </div>
+              ) : (
+                 <div className="flex-1 flex flex-col items-center justify-center text-neutral-700">
+                    <Globe className="h-12 w-12 mb-4 opacity-5" />
+                    <p className="text-sm italic">Select an event from the stream to inspect details</p>
+                 </div>
+              )}
+           </div>
+        </div>
+      </div>
+    </DashboardLayout>
+  );
+}
+
+function EventListItem({ event, isActive, onClick }: any) {
+  const timestamp = typeof event.receivedAt === 'number' ? event.receivedAt : (event.receivedAt?.seconds ? event.receivedAt.seconds * 1000 : Date.now());
+  const time = new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  
+  return (
+    <button 
+      onClick={onClick}
+      className={cn(
+        "w-full flex items-center justify-between p-4 text-left transition-all",
+        isActive ? "bg-brand-blue/5 border-l-2 border-brand-blue" : "hover:bg-white/[0.02]"
+      )}
+    >
+       <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+             <span className="text-xs font-bold text-emerald-400">200</span>
+             <span className="text-xs font-semibold text-white uppercase">{event.method}</span>
+          </div>
+          <div className="text-[10px] text-neutral-500 truncate max-w-[120px]">
+             {typeof event.body === 'string' ? 'Raw Payload' : (event.body.event || 'Incoming Hook')}
+          </div>
+       </div>
+       <div className="text-[10px] font-mono text-neutral-600">
+          {time}
+       </div>
+    </button>
+  );
+}

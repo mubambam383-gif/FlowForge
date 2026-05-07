@@ -1,0 +1,71 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile data",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "currentOrganizationId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "Organization": {
+      "title": "Organization",
+      "description": "Organization for grouping projects",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "ownerId", "createdAt"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "Integration project",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "organizationId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "organizationId", "createdAt"]
+    },
+    "WebhookEvent": {
+      "title": "WebhookEvent",
+      "description": "Received webhook payload",
+      "type": "object",
+      "properties": {
+        "method": { "type": "string" },
+        "headers": { "type": "object" },
+        "body": { "type": "object" },
+        "receivedAt": { "type": "number" },
+        "createdAt": { "type": "object" }
+      }
+    }
+  },
+  "firestore": {
+    "users/{uid}": {
+      "schema": "User",
+      "description": "Individual user profiles"
+    },
+    "organizations/{orgId}": {
+      "schema": "Organization",
+      "description": "Organizations"
+    },
+    "projects/{projectId}": {
+      "schema": "Project",
+      "description": "Projects"
+    },
+    "users/{uid}/webhooks/main/events": {
+      "schema": "WebhookEvent",
+      "description": "Webhook events for lab"
+    }
+  }
+}
