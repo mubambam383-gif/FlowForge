@@ -49,6 +49,65 @@ async function startServer() {
     res.status(200).json({ status: "received", timestamp: new Date().toISOString() });
   });
 
+  // Mock Server Engine
+  app.all("/m/:serverSlug/*", async (req, res) => {
+    const { serverSlug } = req.params;
+    const path = '/' + req.params[0];
+    const method = req.method;
+
+    console.log(`[MockServer] Request for ${serverSlug} at ${path} [${method}]`);
+
+    try {
+      // Find the mock server
+      const { data: server, error: serverError } = await supabase
+        .from('mock_servers')
+        .select('id, is_active')
+        .eq('slug', serverSlug)
+        .single();
+
+      if (serverError || !server) {
+        return res.status(404).json({ error: "Mock server not found" });
+      }
+
+      if (!server.is_active) {
+        return res.status(403).json({ error: "Mock server is inactive" });
+      }
+
+      // Find the endpoint
+      const { data: endpoint, error: endpointError } = await supabase
+        .from('mock_endpoints')
+        .select('*')
+        .eq('mock_server_id', server.id)
+        .eq('path', path)
+        .eq('method', method)
+        .single();
+
+      if (endpointError || !endpoint) {
+        return res.status(404).json({ 
+          error: "No endpoint defined for this path and method",
+          suggestion: "Use the Mock Server Dashboard to add this route."
+        });
+      }
+
+      // Simulate delay
+      if (endpoint.delay_ms > 0) {
+        await new Promise(resolve => setTimeout(resolve, endpoint.delay_ms));
+      }
+
+      // Set headers
+      if (endpoint.response_headers) {
+        Object.entries(endpoint.response_headers).forEach(([key, value]) => {
+          res.setHeader(key, value as string);
+        });
+      }
+
+      res.status(endpoint.response_status || 200).json(endpoint.response_body || {});
+    } catch (e) {
+      console.error("[MockServer] Error:", e);
+      res.status(500).json({ error: "Internal server error in Mock Engine" });
+    }
+  });
+
   // Proxy endpoint to bypass CORS for API testing
   app.all("/api/proxy", async (req, res) => {
     const { url, method, headers, body } = req.body;

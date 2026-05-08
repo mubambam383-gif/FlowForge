@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import DashboardLayout from '../components/DashboardLayout';
 import Editor from '@monaco-editor/react';
 import { 
@@ -17,53 +17,116 @@ import {
   Lock,
   Code,
   Clock,
-  Search
+  Search,
+  CheckCircle2,
+  AlertCircle,
+  Activity,
+  FileJson
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatBytes } from '../lib/utils';
-import axios from 'axios';
+import { RequestEngine, RequestExecutionResult, RequestSettings } from '../services/requestEngine';
+import { AiDiagnostics } from '../services/aiDiagnostics';
 import { GoogleGenAI } from "@google/genai";
+import { useAuthStore } from '../hooks/useAuth';
+import { supabase } from '../lib/supabase';
 
 export default function ApiTesting() {
+  const { user } = useAuthStore();
   const [method, setMethod] = useState('GET');
-  const [url, setUrl] = useState('https://api.example.com/v1/resource');
-  const [activeTab, setActiveTab] = useState('params');
+  const [url, setUrl] = useState('https://jsonplaceholder.typicode.com/todos/1');
+  const [activeTab, setActiveTab] = useState('body');
   const [body, setBody] = useState('{\n  "name": "FlowForge Test"\n}');
+  const [headers, setHeaders] = useState<string>('{\n  "Content-Type": "application/json"\n}');
+  const [expectedSchema, setExpectedSchema] = useState<string>('{\n  "type": "object"\n}');
+  const [expectedStatus, setExpectedStatus] = useState<string>('200');
   
-  const [response, setResponse] = useState<any>(null);
+  const [response, setResponse] = useState<RequestExecutionResult | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [diagnostics, setDiagnostics] = useState<string | null>(null);
   const [isDiagnosing, setIsDiagnosing] = useState(false);
+  const [history, setHistory] = useState<any[]>([]);
+  const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (user) {
+      fetchHistory();
+    }
+  }, [user]);
+
+  const fetchHistory = async () => {
+    const { data, error } = await supabase
+      .from('request_logs')
+      .select('*')
+      .eq('user_id', user?.id)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    
+    if (data) setHistory(data);
+  };
 
   const getAiClient = () => {
     const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error("GEMINI_API_KEY is not defined");
-    }
-    
+    if (!apiKey) throw new Error("GEMINI_API_KEY is not defined");
     return new GoogleGenAI({ apiKey });
   };
 
   const handleSend = async () => {
+    if (!user) return;
     setIsSending(true);
     setResponse(null);
     setDiagnostics(null);
     
     try {
-      // Use our backend proxy to avoid CORS
-      const res = await axios.post('/api/proxy', {
-        url,
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: method !== 'GET' ? JSON.parse(body) : undefined
-      });
-      setResponse(res.data);
+      let parsedBody = undefined;
+      if (method !== 'GET' && body.trim()) {
+        try {
+          parsedBody = JSON.parse(body);
+        } catch (e) {
+          throw new Error('Invalid JSON Body');
+        }
+      }
+
+      let parsedHeaders = {};
+      try {
+        parsedHeaders = JSON.parse(headers);
+      } catch (e) {
+         // ignore or warn
+      }
+
+      const settings: RequestSettings = {
+        expectedStatus: expectedStatus.split(',').map(s => parseInt(s.trim())).filter(s => !isNaN(s)),
+        maxDurationMs: 5000,
+      };
+
+      if (expectedSchema.trim()) {
+        try {
+          settings.expectedSchema = JSON.parse(expectedSchema);
+        } catch (e) {}
+      }
+
+      const result = await RequestEngine.execute(
+        {
+          method: method as any,
+          url,
+          data: parsedBody,
+          headers: parsedHeaders
+        },
+        settings,
+        { userId: user.id }
+      );
+
+      setResponse(result);
+      fetchHistory();
     } catch (err: any) {
+      console.error(err);
       setResponse({
-        error: true,
-        message: err.response?.data?.error || err.message,
-        status: err.response?.status,
-        data: err.response?.data
+        status: 0,
+        statusText: 'Error',
+        headers: {},
+        body: err.message,
+        durationMs: 0,
+        validation: { isValid: false, errors: [err.message] }
       });
     } finally {
       setIsSending(false);
@@ -75,21 +138,16 @@ export default function ApiTesting() {
     setIsDiagnosing(true);
     
     try {
-      const prompt = `Analyze this API response for potential integration issues or errors. 
-      URL: ${url}
-      Method: ${method}
-      Request Body: ${body}
-      
-      Response: ${JSON.stringify(response)}
-      
-      Provide a concise 2-3 sentence diagnostic and suggestion for fix.`;
-
-      const result = await getAiClient().models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt
+      const result = await AiDiagnostics.analyzeFailure({
+        url,
+        method,
+        requestBody: body ? JSON.parse(body) : undefined,
+        responseStatus: response.status,
+        responseBody: response.body,
+        validationErrors: response.validation.errors
       });
       
-      setDiagnostics(result.text || "Unable to diagnose at this time.");
+      setDiagnostics(result.explanation + " Fix: " + result.suggestedFix);
     } catch (error) {
       setDiagnostics("AI diagnostic failed. Please check your connection.");
     } finally {
@@ -109,10 +167,28 @@ export default function ApiTesting() {
               </button>
            </div>
            <div className="flex-1 overflow-y-auto p-2 space-y-1">
-              <CollectionItem name="Marketing API" count={4} />
-              <CollectionItem name="User Service" count={12} active />
-              <CollectionItem name="Payment Webhooks" count={3} />
-              <CollectionItem name="Auth Service" count={8} />
+              <div className="px-2 py-1 text-[10px] font-bold text-neutral-600 uppercase tracking-wider mb-1 flex items-center gap-2">
+                 <History className="h-3 w-3" />
+                 Recent Activity
+              </div>
+              {history.map((item) => (
+                 <div 
+                   key={item.id}
+                   onClick={() => {
+                       setUrl(item.url);
+                       setMethod(item.method);
+                   }}
+                   className="flex items-center gap-2 p-2 rounded hover:bg-white/5 cursor-pointer group transition-all"
+                 >
+                   <div className={cn(
+                     "text-[8px] font-bold w-10 py-0.5 rounded text-center uppercase flex-shrink-0",
+                     item.response_status < 400 ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"
+                   )}>{item.method}</div>
+                   <span className="text-[10px] truncate flex-1 text-neutral-400 group-hover:text-neutral-200">
+                     {item.url.replace(/^https?:\/\//, '')}
+                   </span>
+                 </div>
+              ))}
            </div>
         </div>
 
@@ -160,47 +236,56 @@ export default function ApiTesting() {
            {/* Tabs and Editors */}
            <div className="flex-1 flex flex-col min-h-0 min-w-0">
              <div className="flex items-center gap-6 border-b border-white/5 px-2 mb-4">
-                <Tab label="Params" active={activeTab === 'params'} onClick={() => setActiveTab('params')} />
-                <Tab label="Auth" active={activeTab === 'auth'} onClick={() => setActiveTab('auth')} />
-                <Tab label="Headers" active={activeTab === 'headers'} onClick={() => setActiveTab('headers')} />
                 <Tab label="Body" active={activeTab === 'body'} onClick={() => setActiveTab('body')} />
+                <Tab label="Headers" active={activeTab === 'headers'} onClick={() => setActiveTab('headers')} />
+                <Tab label="Validation" active={activeTab === 'validation'} onClick={() => setActiveTab('validation')} />
                 <Tab label="Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
              </div>
 
              <div className="flex-1 overflow-hidden">
                 <AnimatePresence mode="wait">
-                  {activeTab === 'body' ? (
+                  {activeTab === 'body' && (
+                    <EditorTab 
+                      value={body} 
+                      onChange={setBody} 
+                      language="json" 
+                    />
+                  )}
+                  {activeTab === 'headers' && (
+                    <EditorTab 
+                      value={headers} 
+                      onChange={setHeaders} 
+                      language="json" 
+                    />
+                  )}
+                  {activeTab === 'validation' && (
+                    <div className="h-full flex gap-4">
+                       <div className="flex-2 flex flex-col gap-2">
+                          <label className="text-[10px] font-bold text-neutral-500 uppercase">Response Schema (JSON Schema)</label>
+                          <EditorTab value={expectedSchema} onChange={setExpectedSchema} language="json" />
+                       </div>
+                       <div className="flex-1 flex flex-col gap-4">
+                          <div className="flex flex-col gap-2">
+                            <label className="text-[10px] font-bold text-neutral-500 uppercase">Expected Status</label>
+                            <input 
+                              type="text" 
+                              value={expectedStatus}
+                              onChange={e => setExpectedStatus(e.target.value)}
+                              placeholder="200, 201"
+                              className="bg-white/5 border border-white/10 rounded p-2 text-xs text-white outline-none"
+                            />
+                          </div>
+                       </div>
+                    </div>
+                  )}
+                  {activeTab === 'settings' && (
                     <motion.div 
-                      key="body-editor"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="h-full rounded-xl border border-white/5 bg-[#1e1e1e] overflow-hidden"
-                    >
-                      <Editor 
-                        height="100%"
-                        defaultLanguage="json"
-                        theme="vs-dark"
-                        value={body}
-                        onChange={(val) => setBody(val || '')}
-                        options={{
-                          minimap: { enabled: false },
-                          fontSize: 12,
-                          lineNumbers: 'on',
-                          scrollBeyondLastLine: false,
-                          automaticLayout: true,
-                          padding: { top: 16 }
-                        }}
-                      />
-                    </motion.div>
-                  ) : (
-                    <motion.div 
-                      key="other-tab"
+                      key="settings-tab"
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       className="flex h-full items-center justify-center text-neutral-600 text-sm italic"
                     >
-                      No configuration needed for {activeTab}
+                      Enterprise Settings: Retries, Workspaces, RBAC
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -266,7 +351,7 @@ export default function ApiTesting() {
                         height="100%"
                         defaultLanguage="json"
                         theme="vs-dark"
-                        value={JSON.stringify(response, null, 2)}
+                        value={typeof response.body === 'string' ? response.body : JSON.stringify(response.body, null, 2)}
                         options={{
                           readOnly: true,
                           minimap: { enabled: false },
@@ -289,6 +374,33 @@ export default function ApiTesting() {
         </div>
       </div>
     </DashboardLayout>
+  );
+}
+
+function EditorTab({ value, onChange, language }: { value: string, onChange: (v: string) => void, language: string }) {
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="h-full w-full rounded-xl border border-white/5 bg-[#1e1e1e] overflow-hidden"
+    >
+      <Editor 
+        height="100%"
+        defaultLanguage={language}
+        theme="vs-dark"
+        value={value}
+        onChange={(val) => onChange(val || '')}
+        options={{
+          minimap: { enabled: false },
+          fontSize: 12,
+          lineNumbers: 'on',
+          scrollBeyondLastLine: false,
+          automaticLayout: true,
+          padding: { top: 16 }
+        }}
+      />
+    </motion.div>
   );
 }
 

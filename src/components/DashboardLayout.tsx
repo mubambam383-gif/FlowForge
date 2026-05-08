@@ -61,11 +61,11 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
   const sidebarItems = [
     { icon: LayoutDashboard, label: 'Dashboard', to: '/dashboard' },
-    { icon: Activity, label: 'APIs', to: '/api-testing' },
-    { icon: Globe, label: 'Webhooks', to: '/webhook-lab' },
-    { icon: Server, label: 'Mock Servers', to: '/mocks' },
+    { icon: Activity, label: 'API Testing', to: '/api-testing' },
+    { icon: Globe, label: 'Webhook Lab', to: '/webhooks' },
+    { icon: Server, label: 'Mock Servers', to: '/mock-servers' },
     { icon: FileCheck, label: 'Contracts', to: '/contracts' },
-    { icon: History, label: 'Logs', to: '/logs' },
+    { icon: History, label: 'Audit Logs', to: '/logs' },
     { icon: Settings, label: 'Settings', to: '/settings' },
   ];
 

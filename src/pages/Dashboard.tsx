@@ -1,6 +1,7 @@
 import DashboardLayout from '../components/DashboardLayout';
 import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
+import React, { useState, useEffect } from 'react';
 import { 
   Activity, 
   Globe, 
@@ -10,7 +11,9 @@ import {
   Clock,
   ArrowUpRight,
   TrendingUp,
-  BarChart3
+  BarChart3,
+  Server,
+  FileCode
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -21,25 +24,77 @@ import {
   Tooltip, 
   ResponsiveContainer 
 } from 'recharts';
-
-const data = [
-  { name: '00:00', requests: 400, errors: 24 },
-  { name: '04:00', requests: 300, errors: 13 },
-  { name: '08:00', requests: 900, errors: 98 },
-  { name: '12:00', requests: 1200, errors: 120 },
-  { name: '16:00', requests: 1500, errors: 45 },
-  { name: '20:00', requests: 1100, errors: 56 },
-  { name: '23:59', requests: 600, errors: 21 },
-];
+import { supabase } from '../lib/supabase';
+import { useAuthStore } from '../hooks/useAuth';
 
 export default function Dashboard() {
+  const { user } = useAuthStore();
+  const [stats, setStats] = useState({
+    requests: '0',
+    webhooks: '0',
+    mocks: '0',
+    contracts: '0',
+    recentActivity: [] as any[]
+  });
+
+  useEffect(() => {
+    if (user) {
+      fetchDashboardData();
+      
+      // Subscribe to real-time logs
+      const channel = supabase
+        .channel('dashboard-logs')
+        .on('postgres_changes', { 
+            event: 'INSERT', 
+            schema: 'public', 
+            table: 'request_logs',
+            filter: `user_id=eq.${user.id}`
+          }, 
+          () => fetchDashboardData()
+        )
+        .subscribe();
+      
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
+  }, [user]);
+
+  const fetchDashboardData = async () => {
+    const [logsCount, webhooksCount, mocksCount, contractsCount, recentLogs] = await Promise.all([
+      supabase.from('request_logs').select('*', { count: 'exact', head: true }).eq('user_id', user?.id),
+      supabase.from('webhook_events').select('*', { count: 'exact', head: true }).eq('user_id', user?.id),
+      supabase.from('mock_servers').select('*', { count: 'exact', head: true }),
+      supabase.from('contracts').select('*', { count: 'exact', head: true }),
+      supabase.from('request_logs').select('*').eq('user_id', user?.id).order('created_at', { ascending: false }).limit(5)
+    ]);
+
+    setStats({
+      requests: (logsCount.count || 0).toLocaleString(),
+      webhooks: (webhooksCount.count || 0).toLocaleString(),
+      mocks: (mocksCount.count || 0).toLocaleString(),
+      contracts: (contractsCount.count || 0).toLocaleString(),
+      recentActivity: recentLogs.data || []
+    });
+  };
+
+  const chartData = [
+    { name: '00:00', requests: 400, errors: 24 },
+    { name: '04:00', requests: 300, errors: 13 },
+    { name: '08:00', requests: 900, errors: 98 },
+    { name: '12:00', requests: 1200, errors: 120 },
+    { name: '16:00', requests: 1500, errors: 45 },
+    { name: '20:00', requests: 1100, errors: 56 },
+    { name: '23:59', requests: 600, errors: 21 },
+  ];
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
         <header className="flex items-center justify-between">
            <div>
               <h1 className="text-xl font-bold tracking-tight">Overview</h1>
-              <p className="text-xs text-neutral-500">Real-time status of your integrations.</p>
+              <p className="text-xs text-neutral-500">Real-time status of your enterprise integrations.</p>
            </div>
            <div className="flex gap-2">
               <button className="flex items-center gap-2 rounded-md border border-white/5 bg-white/5 px-3 py-1.5 text-xs font-medium text-neutral-400 hover:text-white transition-colors">
@@ -52,34 +107,34 @@ export default function Dashboard() {
         {/* Stats Grid */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
            <StatCard 
-              label="Total Requests" 
-              value="12,482" 
+              label="Total Executions" 
+              value={stats.requests} 
               change="+12.5%" 
               trend="up" 
               icon={<Activity className="h-4 w-4" />} 
            />
            <StatCard 
-              label="Webhook Success" 
-              value="98.2%" 
+              label="Webhooks Logged" 
+              value={stats.webhooks} 
               change="+0.4%" 
               trend="up" 
               icon={<Globe className="h-4 w-4" />} 
               color="text-emerald-400"
            />
            <StatCard 
-              label="Latency (Avg)" 
-              value="142ms" 
-              change="-14ms" 
-              trend="down" 
-              icon={<Zap className="h-4 w-4" />} 
+              label="Mock Servers" 
+              value={stats.mocks} 
+              change="0" 
+              trend="up" 
+              icon={<Server className="h-4 w-4" />} 
            />
            <StatCard 
-              label="Active Failures" 
-              value="3" 
+              label="Contracts Tracked" 
+              value={stats.contracts} 
               change="+2" 
               trend="up" 
-              icon={<AlertCircle className="h-4 w-4" />} 
-              color="text-red-400"
+              icon={<FileCode className="h-4 w-4" />} 
+              color="text-emerald-400"
            />
         </div>
 
@@ -104,7 +159,7 @@ export default function Dashboard() {
               </div>
               <div className="h-[240px] w-full">
                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={data}>
+                    <AreaChart data={chartData}>
                        <defs>
                           <linearGradient id="colorRequests" x1="0" y1="0" x2="0" y2="1">
                              <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
@@ -159,32 +214,21 @@ export default function Dashboard() {
         {/* Bottom Section: Activity and Tasks */}
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
            <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4">
-              <h3 className="mb-4 text-sm font-semibold">Recent Activity</h3>
+              <h3 className="mb-4 text-sm font-semibold">Live Integration Stream</h3>
               <div className="space-y-4">
-                 <ActivityItem 
-                    title="API Test Failed" 
-                    desc="Project Alpha / POST /users/create" 
-                    time="2m ago" 
-                    type="error" 
-                 />
-                 <ActivityItem 
-                    title="Webhook Received" 
-                    desc="Stripe Checkout session.completed" 
-                    time="5m ago" 
-                    type="success" 
-                 />
-                 <ActivityItem 
-                    title="New Mock Setup" 
-                    desc="Simulated error 429 for Auth service" 
-                    time="14m ago" 
-                    type="neutral" 
-                 />
-                 <ActivityItem 
-                    title="Contract Validated" 
-                    desc="User Service OpenAPI spec v2.1" 
-                    time="1h ago" 
-                    type="success" 
-                 />
+                 {stats.recentActivity.length === 0 ? (
+                    <div className="text-center py-8 text-neutral-600 italic text-xs">No activity yet</div>
+                 ) : (
+                    stats.recentActivity.map((log) => (
+                       <ActivityItem 
+                          key={log.id}
+                          title={`${log.method} ${log.url.split('/').pop()}`}
+                          desc={log.url} 
+                          time={new Date(log.created_at).toLocaleTimeString()} 
+                          type={log.response_status < 400 ? 'success' : 'error'} 
+                       />
+                    ))
+                 )}
               </div>
            </div>
 

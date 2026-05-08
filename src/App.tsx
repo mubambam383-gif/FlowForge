@@ -44,8 +44,8 @@ export default function App() {
           
           <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
           <Route path="/api-testing" element={<PrivateRoute><ApiTesting /></PrivateRoute>} />
-          <Route path="/webhook-lab" element={<PrivateRoute><WebhookLab /></PrivateRoute>} />
-          <Route path="/mocks" element={<PrivateRoute><MockServers /></PrivateRoute>} />
+          <Route path="/webhooks" element={<PrivateRoute><WebhookLab /></PrivateRoute>} />
+          <Route path="/mock-servers" element={<PrivateRoute><MockServers /></PrivateRoute>} />
           <Route path="/contracts" element={<PrivateRoute><Contracts /></PrivateRoute>} />
           <Route path="/logs" element={<PrivateRoute><Logs /></PrivateRoute>} />
           <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
