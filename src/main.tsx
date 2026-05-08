@@ -2,6 +2,9 @@ import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
+import { initializeAuth } from './hooks/useAuth';
+
+initializeAuth();
 
 window.addEventListener('error', (event) => {
   console.log('Global error caught:', event.error);

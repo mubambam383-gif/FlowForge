@@ -17,8 +17,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import Editor from '@monaco-editor/react';
-import { collection, query, where, onSnapshot, orderBy, limit } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../hooks/useAuth';
 
 export default function WebhookLab() {
@@ -33,30 +32,59 @@ export default function WebhookLab() {
     if (!user) return;
     
     // Generate the webhook URL using process.env.APP_URL
-    const baseUrl = process.env.APP_URL || window.location.origin;
-    setWebhookUrl(`${baseUrl}/wh/user-${user.uid}`);
+    const baseUrl = window.location.origin;
+    setWebhookUrl(`${baseUrl}/wh/user-${user.id}`);
+
+    const fetchInitialEvents = async () => {
+      const { data, error } = await supabase
+        .from('webhook_events')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('received_at', { ascending: false })
+        .limit(20);
+
+      if (error) {
+        setErrorStatus(error.message);
+      } else {
+        setEvents(data.map(e => ({
+          id: e.id,
+          method: e.payload.method,
+          headers: e.payload.headers,
+          body: e.payload.body,
+          receivedAt: e.received_at
+        })));
+      }
+    };
+
+    fetchInitialEvents();
 
     // Real-time listener for webhook events
-    const path = `users/${user.uid}/webhooks/main/events`;
-    const q = query(
-      collection(db, path),
-      orderBy('receivedAt', 'desc'),
-      limit(20)
-    );
+    const channel = supabase
+      .channel('webhook_events_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'webhook_events',
+          filter: `user_id=eq.${user.id}`
+        },
+        (payload) => {
+          const newEvent = {
+            id: payload.new.id,
+            method: payload.new.payload.method,
+            headers: payload.new.payload.headers,
+            body: payload.new.payload.body,
+            receivedAt: payload.new.received_at
+          };
+          setEvents(prev => [newEvent, ...prev].slice(0, 20));
+        }
+      )
+      .subscribe();
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const newEvents = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      setEvents(newEvents);
-      setErrorStatus(null);
-    }, (error) => {
-      setErrorStatus(error.message);
-      handleFirestoreError(error, OperationType.LIST, path);
-    });
-
-    return () => unsubscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user]);
 
   const copyUrl = () => {
@@ -225,7 +253,7 @@ export default function WebhookLab() {
 }
 
 function EventListItem({ event, isActive, onClick }: any) {
-  const timestamp = typeof event.receivedAt === 'number' ? event.receivedAt : (event.receivedAt?.seconds ? event.receivedAt.seconds * 1000 : Date.now());
+  const timestamp = event.receivedAt ? new Date(event.receivedAt).getTime() : Date.now();
   const time = new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   
   return (

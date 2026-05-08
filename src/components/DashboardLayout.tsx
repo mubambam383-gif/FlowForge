@@ -17,7 +17,7 @@ import {
   Plus
 } from 'lucide-react';
 import { useAuthStore } from '../hooks/useAuth';
-import { auth } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -70,7 +70,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   ];
 
   const handleSignOut = () => {
-    auth.signOut();
+    supabase.auth.signOut();
   };
 
   return (
@@ -105,7 +105,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                 {user?.email?.[0].toUpperCase() || 'U'}
              </div>
              <div className="flex-1 overflow-hidden">
-                <div className="text-xs font-medium truncate">{user?.displayName || 'Developer'}</div>
+                <div className="text-xs font-medium truncate">{user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Developer'}</div>
                 <div className="text-[10px] text-neutral-500 truncate">{user?.email}</div>
              </div>
           </div>

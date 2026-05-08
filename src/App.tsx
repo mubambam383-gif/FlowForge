@@ -1,7 +1,7 @@
 import React, { useEffect, ReactNode } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { initializeAuth, useAuthStore } from './hooks/useAuth';
+import { useAuthStore } from './hooks/useAuth';
 
 // Pages
 import LandingPage from './pages/LandingPage';
@@ -35,10 +35,6 @@ function PrivateRoute({ children }: { children: ReactNode }) {
 }
 
 export default function App() {
-  useEffect(() => {
-    initializeAuth();
-  }, []);
-
   return (
     <QueryClientProvider client={queryClient}>
       <Router>

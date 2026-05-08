@@ -8,13 +8,12 @@ import fs from "fs";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-import { initializeApp } from "firebase/app";
-import { getFirestore, collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { createClient } from "@supabase/supabase-js";
 
-const firebaseConfig = JSON.parse(fs.readFileSync(path.join(process.cwd(), "firebase-applet-config.json"), "utf8"));
+const supabaseUrl = process.env.VITE_SUPABASE_URL || "";
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
-const fbApp = initializeApp(firebaseConfig);
-const db = getFirestore(fbApp, firebaseConfig.firestoreDatabaseId);
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 async function startServer() {
   const app = express();
@@ -28,28 +27,23 @@ async function startServer() {
     console.log(`[Webhook] Received for slug: ${slug}, method: ${req.method}`);
     
     try {
-      // Find the user ID from the slug (format: user-UID_PART)
-      // For simplicity in the lab, we expect slug like "user-ABC12345"
       if (slug.startsWith('user-')) {
-        // We'll need a way to map the short UID to the full UID
-        // But for this demo, let's assume the slug IS the identifier we use in the path
-        // OR better: we write to a collection where the frontend can find it.
-        // Let's use the slug as the collection identifier for now or look up the user.
+        const userId = slug.replace('user-', '');
         
-        // Actually, for the lab, the frontend listens to `users/${user.uid}/webhooks/main/events`
-        // We can pass the full UID in the slug for this demo purposes
-        // WebhookLab.tsx: setWebhookUrl(`${baseUrl}/wh/${user.uid}`);
-        
-        await addDoc(collection(db, `users/${slug.replace('user-', '')}/webhooks/main/events`), {
-          method: req.method,
-          headers: req.headers,
-          body: req.body,
-          receivedAt: Date.now(), // Firestore serverTimestamp is better but we want number for now as per frontend
-          createdAt: serverTimestamp()
+        const { error } = await supabase.from('webhook_events').insert({
+          user_id: userId,
+          payload: {
+            method: req.method,
+            headers: req.headers,
+            body: req.body
+          },
+          source: req.headers['x-simulation'] as string || 'default'
         });
+        
+        if (error) throw error;
       }
     } catch (e) {
-      console.error("Firestore write error in webhook:", e);
+      console.error("Supabase write error in webhook:", e);
     }
     
     res.status(200).json({ status: "received", timestamp: new Date().toISOString() });
