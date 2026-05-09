@@ -21,6 +21,8 @@ import { cn } from '../lib/utils';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../hooks/useAuth';
 import Editor from '@monaco-editor/react';
+import { createNotification } from '../lib/notifications';
+import { getErrorMessage, parseJson, slugify } from '../lib/validation';
 
 export default function MockServers() {
   const { user } = useAuthStore();
@@ -28,11 +30,14 @@ export default function MockServers() {
   const [loading, setLoading] = useState(true);
   const [selectedServer, setSelectedServer] = useState<any>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showServerSettings, setShowServerSettings] = useState(false);
   const [newServerName, setNewServerName] = useState('');
   const [newServerSlug, setNewServerSlug] = useState('');
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   
   const [endpoints, setEndpoints] = useState<any[]>([]);
   const [showEndpointModal, setShowEndpointModal] = useState(false);
+  const [editingEndpoint, setEditingEndpoint] = useState<any>(null);
   const [newEndpoint, setNewEndpoint] = useState({
     path: '/',
     method: 'GET',
@@ -76,7 +81,10 @@ export default function MockServers() {
   };
 
   const handleCreateServer = async () => {
-    if (!newServerName || !newServerSlug) return;
+    if (!newServerName.trim() || !newServerSlug.trim()) {
+      setStatusMessage('Server name and slug are required.');
+      return;
+    }
     
     // Check if workspace exists, otherwise create organization/workspace first (for demo we assume it exists or use null organization)
     // For this lab, we'll just insert directly.
@@ -84,7 +92,7 @@ export default function MockServers() {
       .from('mock_servers')
       .insert({
         name: newServerName,
-        slug: newServerSlug,
+        slug: slugify(newServerSlug),
         owner_id: user?.id,
         workspace_id: null // In production we'd link this
       })
@@ -92,37 +100,95 @@ export default function MockServers() {
       .single();
 
     if (error) {
-      alert(error.message);
+      setStatusMessage(error.message);
     } else {
       setServers([data, ...servers]);
       setShowCreateModal(false);
       setNewServerName('');
       setNewServerSlug('');
+      setStatusMessage('Mock server created.');
+      if (user) await createNotification(user.id, 'Mock server created', data.name, 'success');
     }
   };
 
   const handleCreateEndpoint = async () => {
     if (!selectedServer) return;
+    let responseBody;
+    try {
+      responseBody = parseJson(newEndpoint.body || '{}', {});
+    } catch (error) {
+      setStatusMessage('Response body must be valid JSON.');
+      return;
+    }
     
-    const { data, error } = await supabase
-      .from('mock_endpoints')
-      .insert({
+    const payload = {
         mock_server_id: selectedServer.id,
-        path: newEndpoint.path,
+        path: newEndpoint.path.startsWith('/') ? newEndpoint.path : `/${newEndpoint.path}`,
         method: newEndpoint.method,
         response_status: newEndpoint.status,
-        response_body: JSON.parse(newEndpoint.body || '{}'),
+        response_body: responseBody,
         delay_ms: newEndpoint.delay
-      })
+      };
+
+    const query = editingEndpoint
+      ? supabase.from('mock_endpoints').update(payload).eq('id', editingEndpoint.id)
+      : supabase.from('mock_endpoints').insert(payload);
+
+    const { data, error } = await query
       .select()
       .single();
 
     if (error) {
-      alert(error.message);
+      setStatusMessage(error.message);
     } else {
-      setEndpoints([data, ...endpoints]);
+      setEndpoints(editingEndpoint ? endpoints.map((item) => item.id === data.id ? data : item) : [data, ...endpoints]);
       setShowEndpointModal(false);
+      setEditingEndpoint(null);
+      setStatusMessage(editingEndpoint ? 'Endpoint updated.' : 'Endpoint created.');
     }
+  };
+
+  const openEndpointEditor = (endpoint: any) => {
+    setEditingEndpoint(endpoint);
+    setNewEndpoint({
+      path: endpoint.path,
+      method: endpoint.method,
+      status: endpoint.response_status,
+      body: JSON.stringify(endpoint.response_body || {}, null, 2),
+      delay: endpoint.delay_ms || 0,
+    });
+    setShowEndpointModal(true);
+  };
+
+  const updateSelectedServer = async () => {
+    if (!selectedServer || !newServerName.trim() || !newServerSlug.trim()) return;
+    const { data, error } = await supabase
+      .from('mock_servers')
+      .update({ name: newServerName.trim(), slug: slugify(newServerSlug) })
+      .eq('id', selectedServer.id)
+      .select()
+      .single();
+    if (error) {
+      setStatusMessage(error.message);
+      return;
+    }
+    setServers(servers.map((server) => server.id === data.id ? data : server));
+    setSelectedServer(data);
+    setShowServerSettings(false);
+    setStatusMessage('Mock server updated.');
+  };
+
+  const deleteSelectedServer = async () => {
+    if (!selectedServer || !confirm(`Delete mock server "${selectedServer.name}"?`)) return;
+    const { error } = await supabase.from('mock_servers').delete().eq('id', selectedServer.id);
+    if (error) {
+      setStatusMessage(error.message);
+      return;
+    }
+    setServers(servers.filter((server) => server.id !== selectedServer.id));
+    setSelectedServer(null);
+    setShowServerSettings(false);
+    setStatusMessage('Mock server deleted.');
   };
 
   const toggleServerStatus = async (server: any) => {
@@ -240,7 +306,11 @@ export default function MockServers() {
                           <p className="text-sm text-neutral-500 mt-1">Manage rules, dynamic responses, and latency for this mock server.</p>
                        </div>
                        <div className="flex items-center gap-2">
-                          <button className="p-3 rounded-xl border border-white/10 hover:bg-white/5 transition-all">
+                          <button onClick={() => {
+                            setNewServerName(selectedServer.name);
+                            setNewServerSlug(selectedServer.slug);
+                            setShowServerSettings(true);
+                          }} className="p-3 rounded-xl border border-white/10 hover:bg-white/5 transition-all">
                              <Settings className="h-5 w-5 text-neutral-400" />
                           </button>
                        </div>
@@ -265,7 +335,17 @@ export default function MockServers() {
                     <div className="p-4 px-6 border-b border-white/5 flex items-center justify-between">
                        <h3 className="text-xs font-bold uppercase tracking-widest text-neutral-500">Configured Rules</h3>
                        <button 
-                         onClick={() => setShowEndpointModal(true)}
+              onClick={() => {
+                setEditingEndpoint(null);
+                setNewEndpoint({
+                  path: '/',
+                  method: 'GET',
+                  status: 200,
+                  body: '{\n  "status": "success",\n  "message": "Hello from Mock Server"\n}',
+                  delay: 0
+                });
+                setShowEndpointModal(true);
+              }}
                          className="flex items-center gap-2 text-[10px] font-bold text-white bg-brand-blue/20 hover:bg-brand-blue/30 px-3 py-1.5 rounded-lg border border-brand-blue/20"
                        >
                           <Plus className="h-3 w-3" />
@@ -312,7 +392,7 @@ export default function MockServers() {
                                       </td>
                                       <td className="p-4 px-6 text-right">
                                          <div className="flex items-center justify-end gap-2 transition-opacity">
-                                            <button className="p-1.5 rounded hover:bg-white/10 text-neutral-600 hover:text-white">
+                                            <button onClick={() => openEndpointEditor(endpoint)} className="p-1.5 rounded hover:bg-white/10 text-neutral-600 hover:text-white">
                                                <Settings className="h-3 w-3" />
                                             </button>
                                             <button 
@@ -347,6 +427,11 @@ export default function MockServers() {
            )}
         </div>
       </div>
+      {statusMessage && (
+        <div className="fixed bottom-6 right-6 z-50 rounded-lg border border-white/10 bg-[#121212] px-4 py-3 text-xs text-neutral-200 shadow-2xl">
+          {statusMessage}
+        </div>
+      )}
 
       {/* Modals */}
       <AnimatePresence>
@@ -384,7 +469,7 @@ export default function MockServers() {
                        <input 
                         type="text" 
                         value={newServerSlug}
-                        onChange={e => setNewServerSlug(e.target.value.toLowerCase().replace(/\s+/g, '-'))}
+                        onChange={e => setNewServerSlug(slugify(e.target.value))}
                         placeholder="stripe-engine"
                         className="flex-1 bg-transparent text-white outline-none"
                       />
@@ -415,7 +500,10 @@ export default function MockServers() {
                initial={{ opacity: 0 }}
                animate={{ opacity: 1 }}
                exit={{ opacity: 0 }}
-               onClick={() => setShowEndpointModal(false)}
+               onClick={() => {
+                 setEditingEndpoint(null);
+                 setShowEndpointModal(false);
+               }}
                className="absolute inset-0 bg-black/80 backdrop-blur-sm" 
             />
             <motion.div 
@@ -425,7 +513,7 @@ export default function MockServers() {
               className="relative w-full max-w-2xl bg-[#121212] border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
             >
               <div className="p-6 border-b border-white/10">
-                 <h3 className="text-lg font-bold text-white">Create Response Rule</h3>
+                 <h3 className="text-lg font-bold text-white">{editingEndpoint ? 'Edit Response Rule' : 'Create Response Rule'}</h3>
                  <p className="text-xs text-neutral-500">Define the pattern and static/dynamic response payload.</p>
               </div>
               <div className="p-6 grid grid-cols-2 gap-6">
@@ -497,7 +585,10 @@ export default function MockServers() {
               </div>
               <div className="p-6 bg-white/[0.01] border-t border-white/10 flex gap-3">
                  <button 
-                  onClick={() => setShowEndpointModal(false)}
+                  onClick={() => {
+                    setEditingEndpoint(null);
+                    setShowEndpointModal(false);
+                  }}
                   className="px-6 py-2.5 rounded-xl border border-white/10 text-xs font-bold text-neutral-400 hover:bg-white/5"
                  >
                    CANCEL
@@ -506,8 +597,25 @@ export default function MockServers() {
                    onClick={handleCreateEndpoint}
                    className="flex-1 px-6 py-2.5 rounded-xl bg-brand-blue text-xs font-bold text-white hover:bg-blue-600 transition-all"
                  >
-                   DEPLOY RULE
+                   {editingEndpoint ? 'SAVE RULE' : 'DEPLOY RULE'}
                  </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+        {showServerSettings && selectedServer && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowServerSettings(false)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="relative w-full max-w-md rounded-2xl border border-white/10 bg-[#121212] p-6">
+              <h3 className="mb-4 text-lg font-bold">Server Settings</h3>
+              <div className="space-y-4">
+                <input value={newServerName} onChange={e => setNewServerName(e.target.value)} className="w-full rounded-lg border border-white/10 bg-white/5 p-3 text-sm outline-none" />
+                <input value={newServerSlug} onChange={e => setNewServerSlug(slugify(e.target.value))} className="w-full rounded-lg border border-white/10 bg-white/5 p-3 text-sm outline-none" />
+              </div>
+              <div className="mt-6 flex gap-3">
+                <button onClick={deleteSelectedServer} className="rounded-xl border border-red-500/20 px-4 py-2 text-xs font-bold text-red-400">DELETE</button>
+                <button onClick={() => setShowServerSettings(false)} className="flex-1 rounded-xl border border-white/10 py-2 text-xs font-bold text-neutral-400">CANCEL</button>
+                <button onClick={updateSelectedServer} className="flex-1 rounded-xl bg-brand-blue py-2 text-xs font-bold">SAVE</button>
               </div>
             </motion.div>
           </div>

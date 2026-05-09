@@ -119,12 +119,25 @@ export async function handleProxyRequest(payload: any) {
 
   try {
     const shouldSendBody = !['GET', 'HEAD'].includes(requestMethod);
-    const response = await fetch(parsedUrl.toString(), {
-      method: requestMethod,
-      headers: sanitizeHeaders(headers),
-      body: shouldSendBody && body !== undefined ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(settings.timeout || 30000),
-    });
+    const attempts = Math.max(1, Number(settings.retries || 0) + 1);
+    let response: Response | null = null;
+    let lastError: any = null;
+
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        response = await fetch(parsedUrl.toString(), {
+          method: requestMethod,
+          headers: sanitizeHeaders(headers),
+          body: shouldSendBody && body !== undefined ? JSON.stringify(body) : undefined,
+          signal: AbortSignal.timeout(settings.timeout || 30000),
+        });
+        break;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    if (!response) throw lastError;
 
     responseStatus = response.status;
     responseStatusText = response.statusText;

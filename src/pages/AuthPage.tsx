@@ -6,6 +6,7 @@ import { motion } from 'motion/react';
 
 export default function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
+  const [isResetMode, setIsResetMode] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -18,6 +19,15 @@ export default function AuthPage() {
     setError(null);
     
     try {
+      if (isResetMode) {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: window.location.origin + '/auth'
+        });
+        if (error) throw error;
+        setError("Password reset email sent. Check your inbox.");
+        return;
+      }
+
       if (isLogin) {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
@@ -87,10 +97,10 @@ export default function AuthPage() {
             <Zap className="h-6 w-6 text-white fill-white" />
           </div>
           <h1 className="font-display text-2xl font-bold tracking-tight text-white">
-            {isLogin ? 'Welcome back' : 'Create your account'}
+            {isResetMode ? 'Reset your password' : isLogin ? 'Welcome back' : 'Create your account'}
           </h1>
           <p className="mt-2 text-sm text-neutral-500">
-            {isLogin ? 'Enter your credentials to access FlowForge' : 'Start testing integrations in seconds'}
+            {isResetMode ? 'Enter your email and we will send a reset link' : isLogin ? 'Enter your credentials to access FlowForge' : 'Start testing integrations in seconds'}
           </p>
         </div>
 
@@ -117,7 +127,7 @@ export default function AuthPage() {
               </div>
             </div>
 
-            <div className="space-y-1.5">
+            {!isResetMode && <div className="space-y-1.5">
               <label className="text-xs font-medium text-neutral-400 uppercase tracking-wider">Password</label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-600" />
@@ -130,27 +140,37 @@ export default function AuthPage() {
                   className="w-full rounded-lg border border-white/5 bg-white/5 py-2.5 pl-10 pr-4 text-sm text-white placeholder:text-neutral-600 focus:border-brand-blue/50 focus:outline-none transition-all"
                 />
               </div>
-            </div>
+            </div>}
+
+            {isLogin && !isResetMode && (
+              <button
+                type="button"
+                onClick={() => setIsResetMode(true)}
+                className="text-xs font-semibold text-brand-blue hover:underline"
+              >
+                Forgot password?
+              </button>
+            )}
 
             <button 
               type="submit" 
               disabled={loading}
               className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-blue py-2.5 text-sm font-semibold text-white hover:bg-blue-600 transition-all disabled:opacity-50"
             >
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : (isLogin ? 'Sign In' : 'Sign Up')}
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : (isResetMode ? 'Send reset link' : isLogin ? 'Sign In' : 'Sign Up')}
             </button>
           </form>
 
-          <div className="relative my-8">
+          {!isResetMode && <div className="relative my-8">
             <div className="absolute inset-0 flex items-center">
               <div className="w-full border-t border-white/5"></div>
             </div>
             <div className="relative flex justify-center text-xs uppercase">
               <span className="bg-dark-bg px-2 text-neutral-600">Or continue with</span>
             </div>
-          </div>
+          </div>}
 
-          <div className="grid grid-cols-2 gap-4 mt-4">
+          {!isResetMode && <div className="grid grid-cols-2 gap-4 mt-4">
             <button 
               onClick={handleGoogleSignIn}
               disabled={loading}
@@ -190,14 +210,20 @@ export default function AuthPage() {
               </svg>
               GitHub
             </button>
-          </div>
+          </div>}
           <p className="mt-8 text-center text-xs text-neutral-500">
-            {isLogin ? "Don't have an account?" : "Already have an account?"}{' '}
+            {isResetMode ? 'Remembered your password?' : isLogin ? "Don't have an account?" : "Already have an account?"}{' '}
             <button 
-              onClick={() => setIsLogin(!isLogin)}
+              onClick={() => {
+                if (isResetMode) {
+                  setIsResetMode(false);
+                  return;
+                }
+                setIsLogin(!isLogin);
+              }}
               className="font-semibold text-brand-blue hover:underline"
             >
-              {isLogin ? 'Sign up for free' : 'Log in here'}
+              {isResetMode ? 'Back to login' : isLogin ? 'Sign up for free' : 'Log in here'}
             </button>
           </p>
         </div>
