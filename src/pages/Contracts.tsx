@@ -22,6 +22,8 @@ import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../hooks/useAuth';
 import Editor from '@monaco-editor/react';
 import { ContractEngine } from '../services/contractEngine';
+import { createNotification } from '../lib/notifications';
+import { getErrorMessage, parseJson } from '../lib/validation';
 
 export default function Contracts() {
   const { user } = useAuthStore();
@@ -29,6 +31,8 @@ export default function Contracts() {
   const [loading, setLoading] = useState(true);
   const [selectedContract, setSelectedContract] = useState<any>(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showVersionsModal, setShowVersionsModal] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   
   const [newContract, setNewContract] = useState({
     name: '',
@@ -50,6 +54,7 @@ export default function Contracts() {
     const { data, error } = await supabase
       .from('contracts')
       .select('*')
+      .eq('owner_id', user?.id)
       .order('created_at', { ascending: false });
     
     if (data) setContracts(data);
@@ -65,7 +70,8 @@ export default function Contracts() {
         .insert({
           name: newContract.name,
           version: newContract.version,
-          specification: JSON.parse(newContract.spec),
+          specification: parseJson(newContract.spec, {}),
+          owner_id: user?.id,
           workspace_id: null // Fixed for demo
         })
         .select()
@@ -74,8 +80,10 @@ export default function Contracts() {
       if (error) throw error;
       setContracts([data, ...contracts]);
       setShowUploadModal(false);
+      setStatusMessage('Contract registered.');
+      if (user) await createNotification(user.id, 'Contract registered', `${data.name} v${data.version}`, 'success');
     } catch (e: any) {
-      alert(e.message);
+      setStatusMessage(getErrorMessage(e));
     }
   };
 
@@ -84,13 +92,17 @@ export default function Contracts() {
     try {
       const results = ContractEngine.compareSchemas(
         selectedContract.specification,
-        JSON.parse(compareSpec)
+        parseJson(compareSpec, {})
       );
       setDiffResults(results);
     } catch (e: any) {
-      alert("Invalid JSON for comparison");
+      setStatusMessage("Invalid JSON for comparison");
     }
   };
+
+  const versions = selectedContract
+    ? contracts.filter((contract) => contract.name === selectedContract.name)
+    : [];
 
   return (
     <DashboardLayout>
@@ -167,7 +179,7 @@ export default function Contracts() {
                              <div className="text-2xl font-black text-emerald-500">98%</div>
                           </div>
                           <div className="h-10 w-[1px] bg-white/5" />
-                          <button className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-bold hover:bg-white/10">
+                          <button onClick={() => setShowVersionsModal(true)} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-bold hover:bg-white/10">
                              <HistoryIcon className="h-4 w-4" />
                              VERSIONS
                           </button>
@@ -274,6 +286,11 @@ export default function Contracts() {
            )}
         </div>
       </div>
+      {statusMessage && (
+        <div className="fixed bottom-6 right-6 z-50 rounded-lg border border-white/10 bg-[#121212] px-4 py-3 text-xs text-neutral-200 shadow-2xl">
+          {statusMessage}
+        </div>
+      )}
 
       {/* Upload Modal */}
       <AnimatePresence>
@@ -351,6 +368,30 @@ export default function Contracts() {
                  >
                    REGISTER CONTRACT
                  </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+        {showVersionsModal && selectedContract && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowVersionsModal(false)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="relative w-full max-w-lg rounded-2xl border border-white/10 bg-[#121212] p-6">
+              <h3 className="mb-4 text-lg font-bold">{selectedContract.name} Versions</h3>
+              <div className="space-y-2">
+                {versions.map((contract) => (
+                  <button
+                    key={contract.id}
+                    onClick={() => {
+                      setSelectedContract(contract);
+                      setDiffResults(null);
+                      setShowVersionsModal(false);
+                    }}
+                    className="flex w-full items-center justify-between rounded-lg border border-white/5 bg-white/[0.03] p-3 text-left hover:bg-white/5"
+                  >
+                    <span className="text-xs font-semibold">v{contract.version}</span>
+                    <span className="text-[10px] text-neutral-500">{new Date(contract.created_at).toLocaleString()}</span>
+                  </button>
+                ))}
               </div>
             </motion.div>
           </div>

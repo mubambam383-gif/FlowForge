@@ -2,6 +2,7 @@ import DashboardLayout from '../components/DashboardLayout';
 import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { 
   Activity, 
   Globe, 
@@ -34,8 +35,11 @@ export default function Dashboard() {
     webhooks: '0',
     mocks: '0',
     contracts: '0',
-    recentActivity: [] as any[]
+    recentActivity: [] as any[],
+    logs: [] as any[],
+    webhookEvents: [] as any[]
   });
+  const [rangeHours, setRangeHours] = useState(24);
 
   useEffect(() => {
     if (user) {
@@ -58,35 +62,44 @@ export default function Dashboard() {
         supabase.removeChannel(channel);
       };
     }
-  }, [user]);
+  }, [user, rangeHours]);
 
   const fetchDashboardData = async () => {
-    const [logsCount, webhooksCount, mocksCount, contractsCount, recentLogs] = await Promise.all([
+    const [logsCount, webhooksCount, mocksCount, contractsCount, recentLogs, recentWebhooks] = await Promise.all([
       supabase.from('request_logs').select('*', { count: 'exact', head: true }).eq('user_id', user?.id),
       supabase.from('webhook_events').select('*', { count: 'exact', head: true }).eq('user_id', user?.id),
-      supabase.from('mock_servers').select('*', { count: 'exact', head: true }),
-      supabase.from('contracts').select('*', { count: 'exact', head: true }),
-      supabase.from('request_logs').select('*').eq('user_id', user?.id).order('created_at', { ascending: false }).limit(5)
+      supabase.from('mock_servers').select('*', { count: 'exact', head: true }).eq('owner_id', user?.id),
+      supabase.from('contracts').select('*', { count: 'exact', head: true }).eq('owner_id', user?.id),
+      supabase.from('request_logs').select('*').eq('user_id', user?.id).gte('created_at', new Date(Date.now() - rangeHours * 60 * 60 * 1000).toISOString()).order('created_at', { ascending: false }).limit(100),
+      supabase.from('webhook_events').select('*').eq('user_id', user?.id).order('received_at', { ascending: false }).limit(5)
     ]);
+
+    const logs = recentLogs.data || [];
 
     setStats({
       requests: (logsCount.count || 0).toLocaleString(),
       webhooks: (webhooksCount.count || 0).toLocaleString(),
       mocks: (mocksCount.count || 0).toLocaleString(),
       contracts: (contractsCount.count || 0).toLocaleString(),
-      recentActivity: recentLogs.data || []
+      recentActivity: logs.slice(0, 5),
+      logs,
+      webhookEvents: recentWebhooks.data || []
     });
   };
 
-  const chartData = [
-    { name: '00:00', requests: 400, errors: 24 },
-    { name: '04:00', requests: 300, errors: 13 },
-    { name: '08:00', requests: 900, errors: 98 },
-    { name: '12:00', requests: 1200, errors: 120 },
-    { name: '16:00', requests: 1500, errors: 45 },
-    { name: '20:00', requests: 1100, errors: 56 },
-    { name: '23:59', requests: 600, errors: 21 },
-  ];
+  const chartData = Array.from({ length: 6 }).map((_, index) => {
+    const bucketStart = Date.now() - ((5 - index) * rangeHours * 60 * 60 * 1000) / 6;
+    const bucketEnd = Date.now() - ((4 - index) * rangeHours * 60 * 60 * 1000) / 6;
+    const bucketLogs = stats.logs.filter((log) => {
+      const time = new Date(log.created_at).getTime();
+      return time >= bucketStart && time < bucketEnd;
+    });
+    return {
+      name: new Date(bucketStart).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      requests: bucketLogs.filter((log) => (log.response_status || 0) < 400).length,
+      errors: bucketLogs.filter((log) => (log.response_status || 0) >= 400 || log.error).length,
+    };
+  });
 
   return (
     <DashboardLayout>
@@ -97,8 +110,8 @@ export default function Dashboard() {
               <p className="text-xs text-neutral-500">Real-time status of your enterprise integrations.</p>
            </div>
            <div className="flex gap-2">
-              <button className="flex items-center gap-2 rounded-md border border-white/5 bg-white/5 px-3 py-1.5 text-xs font-medium text-neutral-400 hover:text-white transition-colors">
-                Last 24 hours
+              <button onClick={() => setRangeHours(rangeHours === 24 ? 168 : 24)} className="flex items-center gap-2 rounded-md border border-white/5 bg-white/5 px-3 py-1.5 text-xs font-medium text-neutral-400 hover:text-white transition-colors">
+                Last {rangeHours === 24 ? '24 hours' : '7 days'}
                 <Clock className="h-3 w-3" />
               </button>
            </div>
@@ -199,14 +212,19 @@ export default function Dashboard() {
            <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4">
               <div className="mb-4 flex items-center justify-between">
                  <h3 className="text-sm font-semibold">Active Webhooks</h3>
-                 <button className="text-[10px] font-bold uppercase tracking-wider text-brand-blue hover:underline">View All</button>
+                 <Link to="/webhooks" className="text-[10px] font-bold uppercase tracking-wider text-brand-blue hover:underline">View All</Link>
               </div>
               <div className="space-y-3">
-                 <WebhookStatusItem name="Stripe Production" status="Active" uptime="99.99%" />
-                 <WebhookStatusItem name="GitHub App Sync" status="Active" uptime="99.95%" />
-                 <WebhookStatusItem name="Auth0 Callback" status="Failed" uptime="98.24%" />
-                 <WebhookStatusItem name="Shopify Events" status="Active" uptime="100%" />
-                 <WebhookStatusItem name="Slack Notifications" status="Active" uptime="99.99%" />
+                 {stats.webhookEvents.length === 0 ? (
+                   <div className="py-8 text-center text-xs italic text-neutral-600">No webhook events yet</div>
+                 ) : stats.webhookEvents.map((event) => (
+                   <WebhookStatusItem
+                     key={event.id}
+                     name={event.payload?.body?.event || event.source || 'Incoming webhook'}
+                     status="Active"
+                     uptime={new Date(event.received_at).toLocaleTimeString()}
+                   />
+                 ))}
               </div>
            </div>
         </div>
@@ -235,9 +253,9 @@ export default function Dashboard() {
            <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4">
               <h3 className="mb-4 text-sm font-semibold">Recommended Actions</h3>
               <div className="space-y-2">
-                 <ActionItem title="Fix Contract Mismatch" desc="User profile has missing 'phone' field in response" />
-                 <ActionItem title="Setup Webhook Signature" desc="Stripe webhooks are missing signature validation" />
-                 <ActionItem title="Update Mock Template" desc="Outdated mocks detected for Payment service" />
+                 <ActionItem title="Review failed API tests" desc={`${stats.logs.filter(log => (log.response_status || 0) >= 400 || log.error).length} failures detected in the selected window`} to="/logs?status=error" />
+                 <ActionItem title="Add validation schemas" desc="Saved response schemas make test failures actionable" to="/api-testing" />
+                 <ActionItem title="Keep mock rules fresh" desc="Update mock endpoints when contract schemas change" to="/mock-servers" />
               </div>
            </div>
         </div>
@@ -298,14 +316,14 @@ function ActivityItem({ title, desc, time, type }: any) {
   );
 }
 
-function ActionItem({ title, desc }: any) {
+function ActionItem({ title, desc, to }: any) {
   return (
-    <div className="group flex items-center justify-between rounded-lg border border-white/5 bg-white/5 p-3 hover:border-brand-blue/30 transition-all cursor-pointer">
+    <Link to={to} className="group flex items-center justify-between rounded-lg border border-white/5 bg-white/5 p-3 hover:border-brand-blue/30 transition-all cursor-pointer">
        <div>
           <div className="text-xs font-semibold">{title}</div>
           <div className="text-[10px] text-neutral-600 mt-0.5">{desc}</div>
        </div>
        <ArrowUpRight className="h-4 w-4 text-neutral-700 group-hover:text-brand-blue transition-colors" />
-    </div>
+    </Link>
   );
 }

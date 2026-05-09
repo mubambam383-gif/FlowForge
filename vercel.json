@@ -1,0 +1,25 @@
+{
+  "version": 2,
+  "framework": "vite",
+  "installCommand": "npm ci",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "functions": {
+    "api/**/*.ts": {
+      "maxDuration": 30
+    }
+  },
+  "rewrites": [
+    { "source": "/wh/:slug", "destination": "/api/wh/:slug" },
+    { "source": "/m/:serverSlug", "destination": "/api/m/:serverSlug" },
+    { "source": "/m/:serverSlug/:path*", "destination": "/api/m/:serverSlug/:path*" },
+    { "source": "/auth", "destination": "/index.html" },
+    { "source": "/dashboard", "destination": "/index.html" },
+    { "source": "/api-testing", "destination": "/index.html" },
+    { "source": "/webhooks", "destination": "/index.html" },
+    { "source": "/mock-servers", "destination": "/index.html" },
+    { "source": "/contracts", "destination": "/index.html" },
+    { "source": "/logs", "destination": "/index.html" },
+    { "source": "/settings", "destination": "/index.html" }
+  ]
+}

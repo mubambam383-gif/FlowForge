@@ -105,7 +105,7 @@ export default function LandingPage() {
               <ArrowRight className="h-5 w-5" />
             </Link>
             <a 
-              href="https://github.com" 
+              href="https://github.com/mubambam383-gif/FlowForge" 
               target="_blank"
               rel="noreferrer"
               className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-8 py-4 font-semibold text-white hover:bg-white/10 transition-all"
@@ -207,6 +207,32 @@ export default function LandingPage() {
         </div>
       </section>
 
+      <section id="docs" className="border-y border-white/5 bg-white/[0.02] px-6 py-24">
+        <div className="mx-auto max-w-5xl">
+          <h2 className="font-display text-3xl font-bold text-white">Documentation</h2>
+          <div className="mt-8 grid gap-4 md:grid-cols-3">
+            {[
+              ['API Testing', 'Create collections, send requests, validate schemas, and review logs.'],
+              ['Webhook Lab', 'Copy your webhook URL, receive events, and replay payloads.'],
+              ['Mock Servers', 'Create mock routes with custom status codes, JSON bodies, and latency.'],
+            ].map(([title, description]) => (
+              <div key={title} className="rounded-xl border border-white/5 bg-black/30 p-5">
+                <h3 className="text-sm font-bold text-white">{title}</h3>
+                <p className="mt-2 text-xs text-neutral-500">{description}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section id="pricing" className="px-6 py-24">
+        <div className="mx-auto max-w-4xl rounded-3xl border border-brand-blue/20 bg-brand-blue/5 p-10 text-center">
+          <h2 className="font-display text-3xl font-bold text-white">Developer Preview</h2>
+          <p className="mx-auto mt-4 max-w-2xl text-sm text-neutral-400">Use the included Supabase and Vercel setup to run FlowForge for your team. Billing hooks are documented in settings and can be connected to Stripe when you are ready to monetize.</p>
+          <Link to="/auth" className="mt-8 inline-flex rounded-full bg-brand-blue px-6 py-3 text-sm font-bold text-white">Start now</Link>
+        </div>
+      </section>
+
       {/* Footer */}
       <footer className="border-t border-white/5 py-20 px-6">
         <div className="mx-auto max-w-7xl flex flex-col md:flex-row justify-between gap-12">
@@ -225,25 +251,25 @@ export default function LandingPage() {
             <div>
               <h4 className="text-white font-semibold mb-6">Product</h4>
               <ul className="space-y-4 text-sm text-neutral-500">
-                <li><a href="#" className="hover:text-white transition-colors">Features</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Webhook Lab</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Mock Servers</a></li>
+                <li><a href="#features" className="hover:text-white transition-colors">Features</a></li>
+                <li><Link to="/webhooks" className="hover:text-white transition-colors">Webhook Lab</Link></li>
+                <li><Link to="/mock-servers" className="hover:text-white transition-colors">Mock Servers</Link></li>
               </ul>
             </div>
             <div>
               <h4 className="text-white font-semibold mb-6">Resources</h4>
               <ul className="space-y-4 text-sm text-neutral-500">
-                <li><a href="#" className="hover:text-white transition-colors">Documentation</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">API Reference</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Changelog</a></li>
+                <li><a href="#docs" className="hover:text-white transition-colors">Documentation</a></li>
+                <li><Link to="/api-testing" className="hover:text-white transition-colors">API Reference</Link></li>
+                <li><a href="#pricing" className="hover:text-white transition-colors">Changelog</a></li>
               </ul>
             </div>
             <div>
               <h4 className="text-white font-semibold mb-6">Company</h4>
               <ul className="space-y-4 text-sm text-neutral-500">
-                <li><a href="#" className="hover:text-white transition-colors">About</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Privacy</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Terms</a></li>
+                <li><a href="#docs" className="hover:text-white transition-colors">About</a></li>
+                <li><a href="mailto:privacy@flowforge.local" className="hover:text-white transition-colors">Privacy</a></li>
+                <li><a href="mailto:legal@flowforge.local" className="hover:text-white transition-colors">Terms</a></li>
               </ul>
             </div>
           </div>
@@ -251,8 +277,8 @@ export default function LandingPage() {
         <div className="mx-auto max-w-7xl mt-20 pt-8 border-t border-white/5 flex justify-between items-center text-xs text-neutral-600">
           <p>© 2026 FlowForge Inc. All rights reserved.</p>
           <div className="flex gap-6">
-             <a href="#" className="hover:text-white transition-colors">Twitter</a>
-             <a href="#" className="hover:text-white transition-colors">LinkedIn</a>
+             <a href="https://twitter.com" target="_blank" rel="noreferrer" className="hover:text-white transition-colors">Twitter</a>
+             <a href="https://linkedin.com" target="_blank" rel="noreferrer" className="hover:text-white transition-colors">LinkedIn</a>
           </div>
         </div>
       </footer>

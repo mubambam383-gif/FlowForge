@@ -19,6 +19,7 @@ import { cn } from '../lib/utils';
 import Editor from '@monaco-editor/react';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../hooks/useAuth';
+import { createNotification } from '../lib/notifications';
 
 export default function WebhookLab() {
   const { user } = useAuthStore();
@@ -27,11 +28,12 @@ export default function WebhookLab() {
   const [loading, setLoading] = useState(false);
   const [webhookUrl, setWebhookUrl] = useState('');
   const [errorStatus, setErrorStatus] = useState<string | null>(null);
+  const [successStatus, setSuccessStatus] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
     
-    // Generate the webhook URL using process.env.APP_URL
+    // Same-origin URLs work on localhost and Vercel rewrites.
     const baseUrl = window.location.origin;
     setWebhookUrl(`${baseUrl}/wh/user-${user.id}`);
 
@@ -89,12 +91,16 @@ export default function WebhookLab() {
 
   const copyUrl = () => {
     navigator.clipboard.writeText(webhookUrl);
+    setErrorStatus(null);
+    setSuccessStatus('Webhook URL copied.');
   };
 
   const simulateWebhook = async () => {
     setLoading(true);
+    setErrorStatus(null);
+    setSuccessStatus(null);
     try {
-      await fetch(webhookUrl, {
+      const response = await fetch(webhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Simulation': 'FlowForge' },
         body: JSON.stringify({
@@ -110,8 +116,31 @@ export default function WebhookLab() {
           }
         })
       });
+      if (!response.ok) throw new Error('Webhook simulation failed');
+      setSuccessStatus('Simulation sent.');
+      if (user) await createNotification(user.id, 'Webhook simulated', 'A test webhook event was recorded.', 'success');
     } catch (e) {
-      console.error(e);
+      setErrorStatus(e instanceof Error ? e.message : 'Webhook simulation failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const replayEvent = async () => {
+    if (!selectedEvent) return;
+    setLoading(true);
+    setErrorStatus(null);
+    setSuccessStatus(null);
+    try {
+      const response = await fetch(webhookUrl, {
+        method: selectedEvent.method || 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Simulation': 'Replay' },
+        body: JSON.stringify(selectedEvent.body || {}),
+      });
+      if (!response.ok) throw new Error('Replay failed');
+      setSuccessStatus('Event replayed.');
+    } catch (e) {
+      setErrorStatus(e instanceof Error ? e.message : 'Replay failed');
     } finally {
       setLoading(false);
     }
@@ -136,6 +165,12 @@ export default function WebhookLab() {
               </button>
            </div>
         </header>
+
+        {(errorStatus || successStatus) && (
+          <div className={cn("rounded-lg border px-4 py-2 text-xs", errorStatus ? "border-red-500/20 bg-red-500/10 text-red-300" : "border-emerald-500/20 bg-emerald-500/10 text-emerald-300")}>
+            {errorStatus || successStatus}
+          </div>
+        )}
 
         {/* Webhook Configuration Card */}
         <div className="rounded-xl border border-white/5 bg-white/[0.02] p-6">
@@ -200,7 +235,7 @@ export default function WebhookLab() {
                           <h3 className="text-sm font-semibold">{selectedEvent.method} Event</h3>
                           <span className="text-[10px] text-neutral-600 font-mono">{selectedEvent.id}</span>
                        </div>
-                       <button className="flex items-center gap-2 rounded-md bg-brand-blue/10 px-3 py-1 text-[10px] font-bold text-brand-blue hover:bg-brand-blue/20 transition-all">
+                       <button onClick={replayEvent} disabled={loading} className="flex items-center gap-2 rounded-md bg-brand-blue/10 px-3 py-1 text-[10px] font-bold text-brand-blue hover:bg-brand-blue/20 transition-all disabled:opacity-50">
                           Replay Event
                        </button>
                     </div>

@@ -27,9 +27,10 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatBytes } from '../lib/utils';
 import { RequestEngine, RequestExecutionResult, RequestSettings } from '../services/requestEngine';
 import { AiDiagnostics } from '../services/aiDiagnostics';
-import { GoogleGenAI } from "@google/genai";
 import { useAuthStore } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
+import { createNotification } from '../lib/notifications';
+import { getErrorMessage, isValidUrl, parseJson } from '../lib/validation';
 
 export default function ApiTesting() {
   const { user } = useAuthStore();
@@ -40,19 +41,38 @@ export default function ApiTesting() {
   const [headers, setHeaders] = useState<string>('{\n  "Content-Type": "application/json"\n}');
   const [expectedSchema, setExpectedSchema] = useState<string>('{\n  "type": "object"\n}');
   const [expectedStatus, setExpectedStatus] = useState<string>('200');
+  const [timeoutMs, setTimeoutMs] = useState('30000');
+  const [retries, setRetries] = useState('0');
   
   const [response, setResponse] = useState<RequestExecutionResult | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [diagnostics, setDiagnostics] = useState<string | null>(null);
   const [isDiagnosing, setIsDiagnosing] = useState(false);
+  const [isResponseCollapsed, setIsResponseCollapsed] = useState(false);
   const [history, setHistory] = useState<any[]>([]);
   const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
+  const [collections, setCollections] = useState<any[]>([]);
+  const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null);
+  const [showCollectionModal, setShowCollectionModal] = useState(false);
+  const [newCollectionName, setNewCollectionName] = useState('');
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) {
       fetchHistory();
+      fetchCollections();
     }
   }, [user]);
+
+  const fetchCollections = async () => {
+    const { data } = await supabase
+      .from('collections')
+      .select('*')
+      .eq('owner_id', user?.id)
+      .order('created_at', { ascending: false });
+    setCollections(data || []);
+    if (!selectedCollectionId && data?.[0]) setSelectedCollectionId(data[0].id);
+  };
 
   const fetchHistory = async () => {
     const { data, error } = await supabase
@@ -65,10 +85,61 @@ export default function ApiTesting() {
     if (data) setHistory(data);
   };
 
-  const getAiClient = () => {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error("GEMINI_API_KEY is not defined");
-    return new GoogleGenAI({ apiKey });
+  const handleCreateCollection = async () => {
+    if (!user || !newCollectionName.trim()) return;
+    const { data, error } = await supabase
+      .from('collections')
+      .insert({
+        name: newCollectionName.trim(),
+        owner_id: user.id,
+        description: 'Created from FlowForge API Testing',
+      })
+      .select()
+      .single();
+
+    if (error) {
+      setStatusMessage(error.message);
+      return;
+    }
+
+    setCollections([data, ...collections]);
+    setSelectedCollectionId(data.id);
+    setNewCollectionName('');
+    setShowCollectionModal(false);
+    setStatusMessage('Collection created.');
+  };
+
+  const handleSaveRequest = async () => {
+    if (!user) return;
+    if (!isValidUrl(url)) {
+      setStatusMessage('Enter a valid http:// or https:// URL before saving.');
+      return;
+    }
+
+    try {
+      const requestHeaders = parseJson(headers, {});
+      const requestBody = method === 'GET' ? {} : parseJson(body, {});
+      const { error } = await supabase.from('requests').insert({
+        owner_id: user.id,
+        collection_id: selectedCollectionId,
+        name: `${method} ${new URL(url).pathname || url}`,
+        method,
+        url,
+        headers: requestHeaders,
+        body: requestBody,
+        expected_schema: parseJson(expectedSchema, null),
+        settings: {
+          timeout: Number(timeoutMs) || 30000,
+          retries: Number(retries) || 0,
+          expectedStatus: expectedStatus.split(',').map(s => parseInt(s.trim())).filter(s => !isNaN(s)),
+        },
+      });
+      if (error) throw error;
+      setStatusMessage('Request saved.');
+      await createNotification(user.id, 'Request saved', `${method} ${url}`, 'success');
+    } catch (error) {
+      setStatusMessage(getErrorMessage(error));
+    }
   };
 
   const handleSend = async () => {
@@ -78,6 +149,10 @@ export default function ApiTesting() {
     setDiagnostics(null);
     
     try {
+      if (!isValidUrl(url)) {
+        throw new Error('Enter a valid http:// or https:// URL');
+      }
+
       let parsedBody = undefined;
       if (method !== 'GET' && body.trim()) {
         try {
@@ -97,6 +172,8 @@ export default function ApiTesting() {
       const settings: RequestSettings = {
         expectedStatus: expectedStatus.split(',').map(s => parseInt(s.trim())).filter(s => !isNaN(s)),
         maxDurationMs: 5000,
+        timeout: Number(timeoutMs) || 30000,
+        retries: Number(retries) || 0,
       };
 
       if (expectedSchema.trim()) {
@@ -118,6 +195,7 @@ export default function ApiTesting() {
 
       setResponse(result);
       fetchHistory();
+      await createNotification(user.id, 'API test completed', `${method} ${url} returned ${result.status}`, result.validation.isValid ? 'success' : 'warning');
     } catch (err: any) {
       console.error(err);
       setResponse({
@@ -162,11 +240,28 @@ export default function ApiTesting() {
         <div className="w-64 flex-shrink-0 flex flex-col rounded-xl border border-white/5 bg-white/[0.02]">
            <div className="p-4 border-b border-white/5 flex items-center justify-between">
               <h3 className="text-xs font-bold uppercase tracking-widest text-neutral-500">Collections</h3>
-              <button className="p-1 hover:bg-white/5 rounded transition-colors">
+              <button onClick={() => setShowCollectionModal(true)} className="p-1 hover:bg-white/5 rounded transition-colors">
                  <Plus className="h-4 w-4" />
               </button>
            </div>
            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+              <div className="px-2 py-1 text-[10px] font-bold text-neutral-600 uppercase tracking-wider mb-1 flex items-center gap-2">
+                 <FileJson className="h-3 w-3" />
+                 Saved Collections
+              </div>
+              {collections.length === 0 ? (
+                <button onClick={() => setShowCollectionModal(true)} className="w-full rounded-md p-2 text-left text-[10px] italic text-neutral-600 hover:bg-white/5">
+                  Create a collection to save requests
+                </button>
+              ) : collections.map((collection) => (
+                <CollectionItem
+                  key={collection.id}
+                  name={collection.name}
+                  count={0}
+                  active={selectedCollectionId === collection.id}
+                  onClick={() => setSelectedCollectionId(collection.id)}
+                />
+              ))}
               <div className="px-2 py-1 text-[10px] font-bold text-neutral-600 uppercase tracking-wider mb-1 flex items-center gap-2">
                  <History className="h-3 w-3" />
                  Recent Activity
@@ -177,8 +272,9 @@ export default function ApiTesting() {
                    onClick={() => {
                        setUrl(item.url);
                        setMethod(item.method);
+                       setActiveHistoryId(item.id);
                    }}
-                   className="flex items-center gap-2 p-2 rounded hover:bg-white/5 cursor-pointer group transition-all"
+                   className={cn("flex items-center gap-2 p-2 rounded hover:bg-white/5 cursor-pointer group transition-all", activeHistoryId === item.id && "bg-white/5")}
                  >
                    <div className={cn(
                      "text-[8px] font-bold w-10 py-0.5 rounded text-center uppercase flex-shrink-0",
@@ -228,10 +324,15 @@ export default function ApiTesting() {
                 {isSending ? 'Sending...' : 'Send'}
                 <Play className={cn("h-4 w-4", !isSending && "fill-white")} />
               </button>
-              <button className="p-2 rounded-lg border border-white/10 bg-white/5 text-neutral-400 hover:text-white transition-colors">
+              <button onClick={handleSaveRequest} className="p-2 rounded-lg border border-white/10 bg-white/5 text-neutral-400 hover:text-white transition-colors" title="Save request">
                 <Save className="h-4 w-4" />
               </button>
            </div>
+           {statusMessage && (
+             <div className="rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2 text-xs text-neutral-300">
+               {statusMessage}
+             </div>
+           )}
 
            {/* Tabs and Editors */}
            <div className="flex-1 flex flex-col min-h-0 min-w-0">
@@ -283,9 +384,16 @@ export default function ApiTesting() {
                       key="settings-tab"
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
-                      className="flex h-full items-center justify-center text-neutral-600 text-sm italic"
+                      className="grid h-full grid-cols-2 gap-4 text-xs"
                     >
-                      Enterprise Settings: Retries, Workspaces, RBAC
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold uppercase text-neutral-500">Timeout (ms)</label>
+                        <input value={timeoutMs} onChange={e => setTimeoutMs(e.target.value)} className="w-full rounded bg-white/5 p-2 text-white outline-none" />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold uppercase text-neutral-500">Retries</label>
+                        <input value={retries} onChange={e => setRetries(e.target.value)} className="w-full rounded bg-white/5 p-2 text-white outline-none" />
+                      </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -304,13 +412,13 @@ export default function ApiTesting() {
                       <div className="flex items-center gap-3">
                          <div className={cn(
                            "text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1",
-                           response.error ? "bg-red-500/10 text-red-400" : "bg-emerald-500/10 text-emerald-400"
+                          !response.validation.isValid ? "bg-red-500/10 text-red-400" : "bg-emerald-500/10 text-emerald-400"
                          )}>
-                           {response.status || (response.error ? 'Error' : '200 OK')}
+                          {response.status || (!response.validation.isValid ? 'Error' : '200 OK')}
                          </div>
                          <div className="text-[10px] text-neutral-600 flex items-center gap-1">
                             <Clock className="h-3 w-3" />
-                            {response.time || '124ms'}
+                            {response.durationMs}ms
                          </div>
                          <div className="text-[10px] text-neutral-600 flex items-center gap-1">
                             <Globe className="h-3 w-3" />
@@ -330,13 +438,13 @@ export default function ApiTesting() {
                          {isDiagnosing ? 'Diagnosing...' : 'AI Diagnose'}
                       </button>
                    )}
-                   <button className="p-1 hover:bg-white/5 rounded">
-                      <ChevronDown className="h-4 w-4 text-neutral-600" />
+                   <button onClick={() => setIsResponseCollapsed((value) => !value)} className="p-1 hover:bg-white/5 rounded">
+                      <ChevronDown className={cn("h-4 w-4 text-neutral-600 transition-transform", isResponseCollapsed && "-rotate-90")} />
                    </button>
                 </div>
              </div>
              
-             {response ? (
+            {response && !isResponseCollapsed ? (
                <div className="flex-1 flex flex-col min-h-0">
                   {diagnostics && (
                     <div className="p-3 px-4 bg-brand-blue/5 border-b border-white/5 flex items-start gap-3">
@@ -373,6 +481,21 @@ export default function ApiTesting() {
            </div>
         </div>
       </div>
+      <AnimatePresence>
+        {showCollectionModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowCollectionModal(false)} className="absolute inset-0 bg-black/80" />
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="relative w-full max-w-md rounded-2xl border border-white/10 bg-[#121212] p-6">
+              <h3 className="mb-4 text-lg font-bold">Create Collection</h3>
+              <input value={newCollectionName} onChange={e => setNewCollectionName(e.target.value)} placeholder="e.g. Billing API" className="w-full rounded-lg border border-white/10 bg-white/5 p-3 text-sm outline-none" />
+              <div className="mt-6 flex gap-3">
+                <button onClick={() => setShowCollectionModal(false)} className="flex-1 rounded-xl border border-white/10 py-2 text-xs font-bold text-neutral-400">CANCEL</button>
+                <button onClick={handleCreateCollection} className="flex-1 rounded-xl bg-brand-blue py-2 text-xs font-bold">CREATE</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </DashboardLayout>
   );
 }
@@ -404,12 +527,12 @@ function EditorTab({ value, onChange, language }: { value: string, onChange: (v:
   );
 }
 
-function CollectionItem({ name, count, active }: any) {
+function CollectionItem({ name, count, active, onClick }: any) {
   return (
     <div className={cn(
       "group flex items-center justify-between rounded-md p-2 transition-all cursor-pointer",
       active ? "bg-white/5 text-white" : "text-neutral-500 hover:bg-white/[0.03] hover:text-neutral-300"
-    )}>
+    )} onClick={onClick}>
        <div className="flex items-center gap-2 overflow-hidden">
           <ChevronDown className={cn("h-3 w-3 transition-transform", !active && "-rotate-90")} />
           <Code className="h-3 w-3 flex-shrink-0" />
