@@ -58,6 +58,7 @@ export default function MockServers() {
     const { data, error } = await supabase
       .from('mock_servers')
       .select('*')
+      .eq('owner_id', user?.id)
       .order('created_at', { ascending: false });
     
     if (data) setServers(data);
@@ -84,6 +85,7 @@ export default function MockServers() {
       .insert({
         name: newServerName,
         slug: newServerSlug,
+        owner_id: user?.id,
         workspace_id: null // In production we'd link this
       })
       .select()

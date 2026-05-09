@@ -50,6 +50,7 @@ export default function Contracts() {
     const { data, error } = await supabase
       .from('contracts')
       .select('*')
+      .eq('owner_id', user?.id)
       .order('created_at', { ascending: false });
     
     if (data) setContracts(data);
@@ -66,6 +67,7 @@ export default function Contracts() {
           name: newContract.name,
           version: newContract.version,
           specification: JSON.parse(newContract.spec),
+          owner_id: user?.id,
           workspace_id: null // Fixed for demo
         })
         .select()

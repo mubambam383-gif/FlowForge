@@ -64,8 +64,8 @@ export default function Dashboard() {
     const [logsCount, webhooksCount, mocksCount, contractsCount, recentLogs] = await Promise.all([
       supabase.from('request_logs').select('*', { count: 'exact', head: true }).eq('user_id', user?.id),
       supabase.from('webhook_events').select('*', { count: 'exact', head: true }).eq('user_id', user?.id),
-      supabase.from('mock_servers').select('*', { count: 'exact', head: true }),
-      supabase.from('contracts').select('*', { count: 'exact', head: true }),
+      supabase.from('mock_servers').select('*', { count: 'exact', head: true }).eq('owner_id', user?.id),
+      supabase.from('contracts').select('*', { count: 'exact', head: true }).eq('owner_id', user?.id),
       supabase.from('request_logs').select('*').eq('user_id', user?.id).order('created_at', { ascending: false }).limit(5)
     ]);
 

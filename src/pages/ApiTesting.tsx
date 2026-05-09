@@ -27,7 +27,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatBytes } from '../lib/utils';
 import { RequestEngine, RequestExecutionResult, RequestSettings } from '../services/requestEngine';
 import { AiDiagnostics } from '../services/aiDiagnostics';
-import { GoogleGenAI } from "@google/genai";
 import { useAuthStore } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
 
@@ -63,12 +62,6 @@ export default function ApiTesting() {
       .limit(10);
     
     if (data) setHistory(data);
-  };
-
-  const getAiClient = () => {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error("GEMINI_API_KEY is not defined");
-    return new GoogleGenAI({ apiKey });
   };
 
   const handleSend = async () => {
@@ -304,13 +297,13 @@ export default function ApiTesting() {
                       <div className="flex items-center gap-3">
                          <div className={cn(
                            "text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1",
-                           response.error ? "bg-red-500/10 text-red-400" : "bg-emerald-500/10 text-emerald-400"
+                          !response.validation.isValid ? "bg-red-500/10 text-red-400" : "bg-emerald-500/10 text-emerald-400"
                          )}>
-                           {response.status || (response.error ? 'Error' : '200 OK')}
+                          {response.status || (!response.validation.isValid ? 'Error' : '200 OK')}
                          </div>
                          <div className="text-[10px] text-neutral-600 flex items-center gap-1">
                             <Clock className="h-3 w-3" />
-                            {response.time || '124ms'}
+                            {response.durationMs}ms
                          </div>
                          <div className="text-[10px] text-neutral-600 flex items-center gap-1">
                             <Globe className="h-3 w-3" />

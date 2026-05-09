@@ -31,7 +31,7 @@ export default function WebhookLab() {
   useEffect(() => {
     if (!user) return;
     
-    // Generate the webhook URL using process.env.APP_URL
+    // Same-origin URLs work on localhost and Vercel rewrites.
     const baseUrl = window.location.origin;
     setWebhookUrl(`${baseUrl}/wh/user-${user.id}`);
 

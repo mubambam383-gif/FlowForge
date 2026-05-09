@@ -1,28 +1,27 @@
+import "dotenv/config";
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import cors from "cors";
 import { fileURLToPath } from "url";
-import fs from "fs";
+import { GoogleGenAI } from "@google/genai";
+import { requireSupabaseAdmin } from "./api/_lib/supabaseAdmin";
+import { handleProxyRequest } from "./api/_lib/proxyHandler";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.VITE_SUPABASE_URL || "";
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT || 3000);
 
   app.use(cors());
-  app.use(express.json());
+  app.use(express.json({ limit: "1mb" }));
 
   app.all("/wh/:slug", async (req, res) => {
+    const supabase = requireSupabaseAdmin(res);
+    if (!supabase) return;
+
     const { slug } = req.params;
     console.log(`[Webhook] Received for slug: ${slug}, method: ${req.method}`);
     
@@ -50,9 +49,12 @@ async function startServer() {
   });
 
   // Mock Server Engine
-  app.all("/m/:serverSlug/*", async (req, res) => {
+  app.all(["/m/:serverSlug", "/m/:serverSlug/*"], async (req, res) => {
+    const supabase = requireSupabaseAdmin(res);
+    if (!supabase) return;
+
     const { serverSlug } = req.params;
-    const path = '/' + req.params[0];
+    const path = req.params[0] ? '/' + req.params[0] : '/';
     const method = req.method;
 
     console.log(`[MockServer] Request for ${serverSlug} at ${path} [${method}]`);
@@ -109,36 +111,53 @@ async function startServer() {
   });
 
   // Proxy endpoint to bypass CORS for API testing
-  app.all("/api/proxy", async (req, res) => {
-    const { url, method, headers, body } = req.body;
-    
-    if (!url) {
-      return res.status(400).json({ error: "URL is required" });
+  app.post("/api/proxy", async (req, res) => {
+    const result = await handleProxyRequest(req.body);
+    res.status(result.statusCode).json(result.body);
+  });
+
+  app.post("/api/diagnose", async (req, res) => {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: "GEMINI_API_KEY is not configured on the server." });
     }
 
+    const context = req.body || {};
+    const ai = new GoogleGenAI({ apiKey });
+    const prompt = `
+As an expert API Reliability Engineer, analyze this integration failure and provide a root cause and solution.
+
+CONTEXT:
+URL: ${context.url}
+Method: ${context.method}
+${context.requestBody ? `Request: ${JSON.stringify(context.requestBody)}` : ""}
+
+FAILURE DATA:
+Status: ${context.responseStatus}
+Error: ${context.error || "None"}
+Validation Failures: ${context.validationErrors?.join(", ") || "None"}
+Response Payload: ${JSON.stringify(context.responseBody)}
+
+INSTRUCTIONS:
+Return only JSON in this shape: { "rootCause": string, "explanation": string, "suggestedFix": string, "confidence": number }
+`;
+
     try {
-      const response = await fetch(url, {
-        method: method || "GET",
-        headers: headers || {},
-        body: method !== "GET" ? JSON.stringify(body) : undefined,
+      const result = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
       });
-
-      const responseData = await response.text();
-      let parsedData;
-      try {
-        parsedData = JSON.parse(responseData);
-      } catch (e) {
-        parsedData = responseData;
-      }
-
-      res.status(response.status).json({
-        status: response.status,
-        statusText: response.statusText,
-        headers: Object.fromEntries(response.headers.entries()),
-        data: parsedData,
+      const text = result.text || "";
+      const jsonStr = text.match(/\{[\s\S]*\}/)?.[0] || text;
+      res.status(200).json(JSON.parse(jsonStr));
+    } catch (error) {
+      console.error("AI diagnostics failed:", error);
+      res.status(500).json({
+        rootCause: "Analysis Failed",
+        explanation: "Unable to process failure context at this time.",
+        suggestedFix: "Check server logs, verify GEMINI_API_KEY, or retry diagnostic.",
+        confidence: 0,
       });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
     }
   });
 
